@@ -6,6 +6,7 @@
 #include <thread>
 #include <mutex>
 #include <map>
+#include <string.h>
 #include <queue>
 
 
@@ -82,23 +83,42 @@ struct Data {
     string requestOder;
     int len;
     string msg;
+    string fileType;
 
     Data(int len = 1000) {
         this->len = len;
         rcvData = new char[len];
         path = "";
         requestOder = "";
+        fileType = "";
     }
 
     string getRequest() {
         path = "";
         requestOder = "";
+        fileType = "unKnown";
 
         for (int i = 0; i < 5; i++) {
             requestOder = requestOder + rcvData[i];
         }
+        if (requestOder!="GET /") {
+            path = "None";
+            fileType = "UnKnow";
+            return path;
+        }
+        bool isType = 0;
         for (int i = 5; i < len; i++) {
+
             if (rcvData[i] != ' ') {
+                if (isType) {
+                    fileType += rcvData[i];
+                }
+
+                if (rcvData[i] == '.') {
+                    fileType = "";
+                    isType = 1;
+                }
+
                 path = path + rcvData[i];
             } else {
                 break;
@@ -107,25 +127,54 @@ struct Data {
         return path;
     }
 
+    /**
+     * 判断文件类型
+     * @return
+     * 0: 不知道
+     * 1: 文本
+     * 2: 图片
+     */
+    int whichType() {
+        if (this->fileType == "html" || this->fileType == "css") {
+            return 1;
+        } else if (fileType == "png" || fileType == "jpg" || fileType == "gif" || fileType == "jpeg") {
+            return 2;
+        } else return 0;
+    }
+
     int sendData(SOCKET &client_sock) {
-        ifstream infile("D:/ServerData/" + this->path);
+        ifstream infile("D:/ServerData/" + this->path, ios::binary);
         string http;
 
-        int fileSize;
+        long long fileSize;
+        int type = 0;
         if (infile.is_open()) {
             infile.seekg(0, ios::end);
-            fileSize = (int) infile.tellg();
+            fileSize = (long long) infile.tellg();
             infile.seekg(0, ios::beg);
+
 
             http = "HTTP/1.1 200 OK\r\n";
             http += "Server: cainot's server\r\n";
-            http += "Connection: close\r\n";
-            http += "Content-Type: text/html; charset=utf-8\r\n";
+            http += "Connection: keep-alive\r\n";
+            type = this->whichType();
+
+            switch (type) {
+                case 1:
+                    http += "Content-Type: text/" + this->fileType + "; charset=utf-8\r\n";
+                    break;
+                case 2:
+                    http += "Content-Type: image/" + this->fileType + "\r\n";
+                    break;
+                default:
+                    http += "Content-Type: text/txt; charset=utf-8\r\n";
+                    break;
+            }
             http += "Content-Length: " + to_string(fileSize) + "\r\n\r\n";
 
             msg = "200 OK";
         } else {
-            infile.open("D:/ServerData/notFound.html");
+            infile.open("D:/ServerData/notFound.html", ios::binary);
             if (!infile.is_open()) {
                 fileSize = 0;
             } else {
@@ -150,12 +199,12 @@ struct Data {
         send(client_sock, http.c_str(), http.size(), 0);
 
         int length = 10240;
-        char *buffer = new char[length];
+        char *buffer = new char[length + 1];
 
         while (!infile.eof()) {
-            infile.read(buffer, length);
-            http = string(buffer);
-            send(client_sock, http.c_str(), http.size(), 0);
+            infile.read(buffer, sizeof(char) * length);
+//            http = string(buffer);
+            send(client_sock, buffer, length, 0);
         }
 
         this_thread::sleep_for(chrono::seconds(5));
