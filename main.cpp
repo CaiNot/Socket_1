@@ -92,6 +92,11 @@ struct Data {
 
     string getRequest() {
         path = "";
+        requestOder = "";
+
+        for (int i = 0; i < 5; i++) {
+            requestOder = requestOder + rcvData[i];
+        }
         for (int i = 5; i < len; i++) {
             if (rcvData[i] != ' ') {
                 path = path + rcvData[i];
@@ -99,15 +104,11 @@ struct Data {
                 break;
             }
         }
-        for (int i = 0; i < 5; i++) {
-            requestOder = requestOder + rcvData[i];
-        }
         return path;
     }
 
     int sendData(SOCKET &client_sock) {
         ifstream infile("D:/ServerData/" + this->path);
-//        cout << this->path << endl;
         string http;
 
         int fileSize;
@@ -168,13 +169,13 @@ struct Data {
 };
 
 
-map<SOCKET, thread *> threads;
-queue<thread *> doneThreads;
+map<SOCKET, thread *> threads; // 工作线程
+queue<thread *> doneThreads; // 完工线程
 
 int respond(SOCKET client_sock, struct sockaddr_in client_sockaddr) {
     Data data;
-    int recvLen = recv(client_sock, data.rcvData, 1000, 0);
 
+    int recvLen = recv(client_sock, data.rcvData, 1000, 0);
 
     if (recvLen == SOCKET_ERROR) {
         cout << "receive Error" << endl;
@@ -185,28 +186,33 @@ int respond(SOCKET client_sock, struct sockaddr_in client_sockaddr) {
     data.sendData(client_sock);
     closesocket(client_sock);
 
-    lock_guard<mutex> lockGuard(my_mutex);
+    lock_guard<mutex> lockGuard(my_mutex);// 防止多个线程同时在修改队列或输出的时候出错
+
     cout << "address: " << inet_ntoa(client_sockaddr.sin_addr) << "\tport: " << client_sockaddr.sin_port
          << "\trequest: " + data.requestOder + data.path << "\tresult: " << data.msg << endl;
     thread *t = ::threads[client_sock];
     doneThreads.push(t);
     ::threads.erase(client_sock);
+
     return 0;
 }
 
 void deleteThread(int *isEnd) {
     thread *t;
     while (true) {
-        while (!doneThreads.empty()) {
-            t = doneThreads.front();
-            if (t->joinable())
-                t->join();
-            else {
-                cout << "Thread can not join" << endl;
-                return;
+        if (!doneThreads.empty()) {// 防止不停地上锁解锁
+            lock_guard<mutex> lockGuard(my_mutex); // 这里加上锁，防止多个线程同时在修改队列的时候出错
+            while (!doneThreads.empty()) {
+                t = doneThreads.front();
+                if (t->joinable())
+                    t->join();
+                else {
+                    cout << "Thread can not join" << endl;
+                    return;
+                }
+                delete t;
+                doneThreads.pop();
             }
-            delete t;
-            doneThreads.pop();
         }
     }
 
@@ -230,17 +236,16 @@ int main() {
         SOCKET client_sock = accept(hp.getServerID(), (LPSOCKADDR) &client_sockaddr, &client_sockaddr_size);
         if (client_sock == -1) {
             cout << "accept Error" << endl;
-            return -1;
+            break;
 
         }
         thread *t = new thread(respond, client_sock, client_sockaddr);
         threads[client_sock] = t;
     }
-    cout << "aaa normal" << endl;
 
     closesocket(hp.getServerID());
 
-    cout << "OK";
+    cout << "Server Shut Down" << endl;
 
     return 0;
 }
